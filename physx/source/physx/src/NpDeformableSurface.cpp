@@ -457,6 +457,11 @@ PxCudaContextManager* NpDeformableSurface::getCudaContextManager() const
 
 void NpDeformableSurface::setDeformableSurfaceFlag(PxDeformableSurfaceFlag::Enum flag, bool val)
 {
+    if (getNpScene() && flag == PxDeformableSurfaceFlag::eENABLE_SELF_COLLISION_DAT)
+    {
+        PxGetFoundation().error(PxErrorCode::eINVALID_OPERATION, PX_FL, "Set DAT before adding the surface to a scene.");
+        return;
+    }
 	PxDeformableSurfaceFlags flags = mCore.getSurfaceFlags();
 	if (val)
 		flags.raise(flag);
@@ -468,6 +473,11 @@ void NpDeformableSurface::setDeformableSurfaceFlag(PxDeformableSurfaceFlag::Enum
 
 void NpDeformableSurface::setDeformableSurfaceFlags(PxDeformableSurfaceFlags flags)
 {
+    if (getNpScene() && ((flags ^ mCore.getSurfaceFlags()) & PxDeformableSurfaceFlag::eENABLE_SELF_COLLISION_DAT))
+    {
+        PxGetFoundation().error(PxErrorCode::eINVALID_OPERATION, PX_FL, "Set DAT before adding the surface to a scene.");
+        return;
+    }
 	mCore.setSurfaceFlags(flags);
 }
 

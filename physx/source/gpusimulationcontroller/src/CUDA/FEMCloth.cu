@@ -38,6 +38,8 @@ extern "C" __host__ void initFEMClothKernels1() {}
 
 #define USE_BLOCK_COPY 1
 
+#include "ClothDat.cuh"
+
 /*******************************************************************************
  *
  * 

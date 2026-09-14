@@ -43,7 +43,11 @@ struct PxDeformableSurfaceFlag
 	enum Enum
 	{
 		eUSE_ANISOTROPIC_MODEL		= 1 << 0,	// 0: use isotropic model, 1: use anistropic model
-		eENABLE_FLATTENING			= 1 << 1	// 0: query rest bending angle from rest shape, 1: use zero rest bending angle
+		eENABLE_FLATTENING			= 1 << 1,	// 0: query rest bending angle from rest shape, 1: use zero rest bending angle
+		// Experimental Planar-DAT. Set before adding to a scene. TGS, isolated
+		// triangle cloth only; protects self-collision, not rigid/multi-cloth coupling.
+		// Uses shape contactOffset as detection margin. Default: disabled.
+		eENABLE_SELF_COLLISION_DAT = 1 << 2
 	};
 };
 

@@ -77,6 +77,7 @@ LIST(APPEND SNIPPETS_LIST ${PLATFORM_SNIPPETS_LIST})
 # These are separate because we don't ship CUDA in the public release yet.
 # To be changed if we decide otherwise.
 SET(GPU_SNIPPET_LIST
+	ClothTwist
 	HelloGRB DeformableSurface DeformableVolume DeformableVolumeAttachment DeformableVolumeKinematic DeformableSurfaceSkinning DeformableVolumeSkinning SDF PBF PBFMultiMat Isosurface
 	OmniPvdMultiGeom
 	RBDirectGPUAPI DirectGPUAPIArticulation)

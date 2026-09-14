@@ -50,6 +50,7 @@ SET(PHYXGPU_SIMCONTROLLER_HEADERS
 	${PHYSX_SOURCE_DIR}/gpusimulationcontroller/include/PxgDeformableContactInfo.h
 	${PHYSX_SOURCE_DIR}/gpusimulationcontroller/include/PxgDeformableConstraints.h
 	${PHYSX_SOURCE_DIR}/gpusimulationcontroller/include/PxgFEMCloth.h
+	${PHYSX_SOURCE_DIR}/gpusimulationcontroller/include/PxgClothDat.h
 	${PHYSX_SOURCE_DIR}/gpusimulationcontroller/include/PxgFEMClothBuffer.h
 	${PHYSX_SOURCE_DIR}/gpusimulationcontroller/include/PxgParticleSystem.h
 	${PHYSX_SOURCE_DIR}/gpusimulationcontroller/include/PxgParticleSystemBuffer.h
@@ -118,6 +119,7 @@ SET(PHYXGPU_SIMCONTROLLER_CUDA_INCLUDE
 	${GPUSIMCTRL_SOURCE_DIR}/CUDA/deformableUtils.cuh
 	${GPUSIMCTRL_SOURCE_DIR}/CUDA/particleSystem.cuh
 	${GPUSIMCTRL_SOURCE_DIR}/CUDA/FEMClothUtil.cuh
+	${GPUSIMCTRL_SOURCE_DIR}/CUDA/ClothDat.cuh
 	${GPUSIMCTRL_SOURCE_DIR}/CUDA/matrixDecomposition.cuh
 	${GPUSIMCTRL_SOURCE_DIR}/CUDA/marchingCubesTables.cuh
 	${GPUSIMCTRL_SOURCE_DIR}/CUDA/denseGridStandalone.cuh

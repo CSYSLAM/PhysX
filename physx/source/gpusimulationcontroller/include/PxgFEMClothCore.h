@@ -96,6 +96,10 @@ namespace physx
 							PxReal rigidAttachmentBiasCoefficient);
 
 		void solve_velocity(PxU32 iter, PxU32 maxIter, PxReal dt);
+		void datBegin();
+		void datCommit(PxReal dt);
+		void datLaunch(PxU32 kernel, PxU32 blocks, PxReal dt);
+		bool mDatEnabled = false;
 
 		void step(PxReal dt, CUstream stream, PxU32 nbFEMCloths, const PxVec3& gravity, bool adaptiveCollisionPairUpdate, bool forceUpdateClothContactPairs);
 

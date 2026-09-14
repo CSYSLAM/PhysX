@@ -26,6 +26,10 @@
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.
 
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <cstdlib>
 #include "PxgFEMClothCore.h"
 #include "CudaKernelWrangler.h"
 #include "DyDeformableSurface.h"
@@ -599,6 +603,32 @@ namespace physx
 
 	void PxgFEMClothCore::checkBufferOverflows()
 	{
+        if (mDatEnabled)
+        {
+            PxScopedCudaLock lock(*mCudaContextManager);
+            if (mCudaContext->streamSynchronize(mStream) != CUDA_SUCCESS)
+            {
+                PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "Cloth DAT stream synchronization failed.");
+                return;
+            }
+            const auto& active = mSimController->getBodySimManager().mActiveFEMCloths;
+            const PxgFEMCloth* cloths = mSimController->getFEMCloths();
+            for (PxU32 i = 0; i < active.size(); ++i)
+            {
+                const PxgClothDat& dat = cloths[active[i]].mDat;
+                if (!dat.counters) continue;
+                PxU32 status = 0;
+                if (mCudaContext->memcpyDtoH(&status, reinterpret_cast<CUdeviceptr>(dat.counters+1), sizeof(status)) != CUDA_SUCCESS)
+                {
+                    PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "Cloth DAT status readback failed.");
+                    continue;
+                }
+                if (status)
+                    PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL,
+                        "Cloth DAT rejected updates: status=%u (1 capacity, 2 nonseparated base, 4 nonfinite). Recreate actor to reset.", status);
+            }
+        }
+
 		PxU32 contactCountNeeded =
 			PxMax(mContactCountsPrevTimestep[ContactCounts::ePARTICLE],
 				  PxMax(mContactCountsPrevTimestep[ContactCounts::eRIGID],
@@ -1392,12 +1422,103 @@ namespace physx
 
 	// Ensure the relation v = (x - x0) / dt is maintained at all times.
 	// Any velocity changes or filtering, if needed, are handled separately in solve_velocity().
+    void PxgFEMClothCore::datLaunch(PxU32 kernel, PxU32 blocks, PxReal dt)
+    {
+        PxgSimulationCore* core = mSimController->getSimulationCore();
+        PxgFEMCloth* cloths = core->getFEMClothBuffer().getTypedPtr();
+        PxU32* active = core->getActiveFEMClothBuffer().getTypedPtr();
+        const PxU32 count = mSimController->getBodySimManager().mActiveFEMCloths.size();
+        PxCudaKernelParam args[] = {PX_CUDA_KERNEL_PARAM(cloths), PX_CUDA_KERNEL_PARAM(active), PX_CUDA_KERNEL_PARAM(dt)};
+        const CUresult result = mCudaContext->launchKernel(mGpuKernelWranglerManager->getCuFunction(kernel),
+            blocks, count, 1, 256, 1, 1, 0, mStream, args, sizeof(args), 0, PX_FL);
+        if (result != CUDA_SUCCESS)
+            PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "Cloth DAT kernel launch failed (%u).", PxU32(result));
+    }
+
+    void PxgFEMClothCore::datBegin()
+    {
+        // Diagnostic paths are opt-in; the normal solver allocates no host work.
+        static const bool exhaustive = std::getenv("PHYSX_DAT_EXHAUSTIVE") != NULL;
+        static const bool audit = std::getenv("PHYSX_DAT_AUDIT_CANDIDATES") != NULL;
+        const PxU32 blocks = (mSimController->getSimulationCore()->getMaxClothVerts()+255)/256;
+        datLaunch(PxgKernelIds::CLOTH_DAT_BEGIN, blocks, 0.f);
+        datLaunch(PxgKernelIds::CLOTH_DAT_BOUNDS, 128, 0.f);
+        datLaunch(exhaustive ? PxgKernelIds::CLOTH_DAT_DETECT_VT_REFERENCE : PxgKernelIds::CLOTH_DAT_DETECT_VT, 256, 0.f);
+        datLaunch(exhaustive ? PxgKernelIds::CLOTH_DAT_DETECT_EE_REFERENCE : PxgKernelIds::CLOTH_DAT_DETECT_EE, 256, 0.f);
+        if (!audit || exhaustive) return;
+        const auto& active = mSimController->getBodySimManager().mActiveFEMCloths;
+        const PxgFEMCloth* cloths = mSimController->getFEMCloths();
+        typedef std::array<PxU32,5> Key;
+        std::vector<std::vector<Key>> optimized(active.size());
+        const auto readKeys = [this](const PxgClothDat& dat, std::vector<Key>& keys) {
+            PxU32 counters[2];
+            if (mCudaContext->streamSynchronize(mStream) != CUDA_SUCCESS ||
+                mCudaContext->memcpyDtoH(counters, reinterpret_cast<CUdeviceptr>(dat.counters), sizeof(counters)) != CUDA_SUCCESS)
+            {
+                PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "Cloth DAT candidate counter readback failed.");
+                return false;
+            }
+            if (counters[1] || counters[0]>dat.capacity) return false;
+            std::vector<PxgClothDatPair> pairs(counters[0]);
+            if (!pairs.empty() &&
+                mCudaContext->memcpyDtoH(pairs.data(), reinterpret_cast<CUdeviceptr>(dat.pairs), pairs.size()*sizeof(PxgClothDatPair)) != CUDA_SUCCESS)
+            {
+                PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL, "Cloth DAT candidate readback failed.");
+                return false;
+            }
+            for (const auto& p : pairs) keys.push_back(Key{{p.kind,p.ids.x,p.ids.y,p.ids.z,p.ids.w}});
+            std::sort(keys.begin(), keys.end());
+            return true;
+        };
+        for (PxU32 i=0; i<active.size(); ++i)
+        {
+            const PxgClothDat& dat=cloths[active[i]].mDat;
+            if (!dat.counters) continue;
+            if (!readKeys(dat, optimized[i])) return; // sticky error is reported at fetch
+            mCudaContext->memsetD32Async(reinterpret_cast<CUdeviceptr>(dat.counters), 0, 1, mStream);
+        }
+        datLaunch(PxgKernelIds::CLOTH_DAT_DETECT_VT_REFERENCE, 256, 0.f);
+        datLaunch(PxgKernelIds::CLOTH_DAT_DETECT_EE_REFERENCE, 256, 0.f);
+        for (PxU32 i=0; i<active.size(); ++i)
+        {
+            const PxgClothDat& dat=cloths[active[i]].mDat;
+            if (!dat.counters) continue;
+            std::vector<Key> reference;
+            if (!readKeys(dat, reference) || reference != optimized[i])
+                PxGetFoundation().error(PxErrorCode::eINTERNAL_ERROR, PX_FL,
+                    "Cloth DAT optimized candidate set differs from exhaustive enumeration.");
+        }
+    }
+
+    void PxgFEMClothCore::datCommit(PxReal dt)
+    {
+        if (!mDatEnabled) return;
+        const PxU32 blocks = (mSimController->getSimulationCore()->getMaxClothVerts()+255)/256;
+        datLaunch(PxgKernelIds::CLOTH_DAT_TRUNCATE, 16, dt);
+        datLaunch(PxgKernelIds::CLOTH_DAT_COMMIT, blocks, dt);
+    }
+
 	void PxgFEMClothCore::solve_position(PxgDevicePointer<PxgPrePrepDesc> prePrepDescd, PxgDevicePointer<PxgSolverCoreDesc> solverCoreDescd,
 										 PxgDevicePointer<PxgArticulationCoreDesc> artiCoreDescd, PxReal dt, CUstream solverStream,
 										 const PxU32 iter, const PxU32 maxIter, const PxVec3& gravity,
 										 const PxReal rigidAttachmentBiasCoefficient)
 	{
 		const PxU32 nbActiveFEMCloths = mSimController->getBodySimManager().mActiveFEMCloths.size();
+        if (iter == 0)
+        {
+            mDatEnabled = false;
+            const auto& active = mSimController->getBodySimManager().mActiveFEMCloths;
+            const PxgFEMCloth* cloths = mSimController->getFEMCloths();
+            for (PxU32 i = 0; i < active.size(); ++i)
+                mDatEnabled |= (cloths[active[i]].mSurfaceFlags & PxDeformableSurfaceFlag::eENABLE_SELF_COLLISION_DAT) != 0;
+            if (mDatEnabled && !mIsTGS)
+            {
+                PxGetFoundation().error(PxErrorCode::eINVALID_OPERATION, PX_FL, "Cloth DAT requires TGS.");
+                mDatEnabled = false;
+            }
+            if (mDatEnabled) datBegin();
+        }
+
 
 		PxgSimulationCore* core = mSimController->getSimulationCore();
 
@@ -1433,6 +1554,8 @@ namespace physx
 			}
 
 			step(dt, mStream, nbActiveFEMCloths, gravity, adaptiveCollisionPairUpdate, forceUpdateClothContactPairs);
+            // Accept prediction before native contacts can consume it.
+            datCommit(dt);
 		}
 
 		PxgFEMCloth* femClothsd = reinterpret_cast<PxgFEMCloth*>(core->getFEMClothBuffer().getDevicePtr());
@@ -1446,14 +1569,18 @@ namespace physx
 
 			// Cloth internal energies
 			solveShellEnergy(femClothsd, activeFEMClothsd, nbActiveFEMCloths, dt);
+            // Pair copy/remap chains have already been averaged and cleared.
+            // Only this accepted position/velocity is exposed to contact stages.
+            datCommit(dt);
 
-			// Cloth-cloth attach pre-count onto cloth.mDeltaPos[v].w (zeroed by the preceding applyExternalDelta).
-			queryClothClothAttachmentReferenceCount();
-
-			// Cloth attachment
-			solveClothAttachmentDelta();
-
-			applyExternalDelta(nbActiveFEMCloths, dt, mStream);
+            // With no attachments the prior contact stage already cleared
+            // mDeltaPos; no external update or DAT transaction is necessary.
+            if (!mDatEnabled || core->getNbActiveClothClothAttachments())
+            {
+                queryClothClothAttachmentReferenceCount();
+                solveClothAttachmentDelta();
+                applyExternalDelta(nbActiveFEMCloths, dt, mStream);
+            }
 		}
 
 		// Interaction with rigid body. Attach + contact share a single merged
@@ -2278,6 +2405,7 @@ namespace physx
 										"GPU cloth_applyExternalDeltasLaunch kernel fail!\n");
 	#endif
 		}
+        datCommit(dt);
 	}
 
 	// Cloth-particle pre-count pass. Bumps cloth.mDeltaPos[v].w per touched

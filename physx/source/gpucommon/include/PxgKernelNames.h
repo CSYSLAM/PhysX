@@ -446,6 +446,14 @@ KERNEL_DEF(AGG_MARK_ADDED_DELETED_AGGREGATED_BOUNDS, "markAddedAndDeletedAggrega
 //FEM-cloth kernel names
 //////////////////////////////////////////////////////////
 KERNEL_DEF(CLOTH_SIM_PREINTEGRATION, "cloth_preIntegrateLaunch")
+KERNEL_DEF(CLOTH_DAT_BEGIN, "cloth_datBegin")
+KERNEL_DEF(CLOTH_DAT_BOUNDS, "cloth_datBounds")
+KERNEL_DEF(CLOTH_DAT_DETECT_VT, "cloth_datDetectVT")
+KERNEL_DEF(CLOTH_DAT_DETECT_EE, "cloth_datDetectEE")
+KERNEL_DEF(CLOTH_DAT_DETECT_VT_REFERENCE, "cloth_datDetectVTReference")
+KERNEL_DEF(CLOTH_DAT_DETECT_EE_REFERENCE, "cloth_datDetectEEReference")
+KERNEL_DEF(CLOTH_DAT_TRUNCATE, "cloth_datTruncate")
+KERNEL_DEF(CLOTH_DAT_COMMIT, "cloth_datCommit")
 KERNEL_DEF(CLOTH_REFIT_BOUND, "cloth_refitBoundLaunch")
 KERNEL_DEF(CLOTH_MIDPHASE_PRIMITIVES, "cloth_midphaseGeneratePairsLaunch")
 KERNEL_DEF(CLOTH_SPHERE_CG, "cloth_SphereContactGenLaunch")

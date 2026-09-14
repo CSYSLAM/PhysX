@@ -32,6 +32,7 @@
 #include "PxgCudaBuffer.h"
 #include "foundation/PxUserAllocated.h"
 #include "foundation/PxBounds3.h"
+#include "PxgClothDat.h"
 
 namespace physx
 {
@@ -44,6 +45,12 @@ class PxgFEMClothBuffer : public PxUserAllocated
 	PxgFEMClothBuffer(PxgAllocatorDesc& allocDesc);
 
 	PxgCudaBuffer triangleMeshData;
+	PxgTypedCudaBuffer<float4> datBase, datAccepted;
+	PxgTypedCudaBuffer<float> datFractions;
+	PxgTypedCudaBuffer<uint2> datEdges;
+	PxgTypedCudaBuffer<PxBounds3> datBounds;
+	PxgTypedCudaBuffer<PxgClothDatPair> datPairs;
+	PxgTypedCudaBuffer<PxU32> datCounters;
 
 	PxgTypedCudaBuffer<float4> deltaPos;
 	PxgTypedCudaBuffer<float4> accumulatedDeltaPos;

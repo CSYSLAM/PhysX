@@ -26,6 +26,7 @@
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
+#include <set>
 #include "PxgSimulationCore.h"
 #include "PxDirectGPUAPI.h"
 #include "cudamanager/PxCudaContextManager.h"
@@ -283,6 +284,14 @@ PxgSoftBodyBuffer::PxgSoftBodyBuffer(PxgAllocatorDesc& allocDesc) :
 
 PxgFEMClothBuffer::PxgFEMClothBuffer(PxgAllocatorDesc& allocDesc) :
 	triangleMeshData(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
+	datBase(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
+	datAccepted(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
+	datFractions(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
+	datEdges(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
+	datBounds(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
+	datPairs(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
+	datCounters(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
+
 	deltaPos(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
 	accumulatedDeltaPos(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
 	accumulatedDeltaVel(allocDesc.deviceAlloc, PxsHeapStats::eSIMULATION_FEMCLOTH),
@@ -1819,6 +1828,37 @@ void PxgSimulationCore::gpuMemDmaUpFEMCloths(Cm::PinnableArray<PxgFEMCloth>& new
 		mCudaContext->memcpyHtoDAsync(buffer->dynamicfrictions.getDevicePtr(), newFEMCloth.mDynamicFrictions, numVerts * sizeof(float), bpStream);
 
 		PxgFEMCloth& femCloth = femClothPool[gpuRemapIndex];
+        femCloth.mDat = PxgClothDat();
+        if (newFEMCloth.mSurfaceFlags & PxDeformableSurfaceFlag::eENABLE_SELF_COLLISION_DAT)
+        {
+            std::set<PxU64> unique;
+            for (PxU32 t = 0; t < numTriangles; ++t)
+            {
+                const uint4 ids = newFEMCloth.mTriangleVertexIndices[t];
+                const PxU32 v[3] = {ids.x, ids.y, ids.z};
+                for (PxU32 e = 0; e < 3; ++e)
+                    unique.insert((PxU64(PxMin(v[e], v[(e+1)%3])) << 32) | PxMax(v[e], v[(e+1)%3]));
+            }
+            PxArray<uint2> edges;
+            for (const PxU64 key : unique)
+                edges.pushBack(uint2{PxU32(key >> 32), PxU32(key)});
+            const PxU32 capacity = 128 * numVerts;
+            buffer->datBase.allocateElements(numVerts, PX_FL);
+            buffer->datAccepted.allocateElements(numVerts, PX_FL);
+            buffer->datFractions.allocateElements(numVerts, PX_FL);
+            buffer->datEdges.allocateElements(edges.size(), PX_FL);
+            buffer->datBounds.allocateElements(numTriangles + edges.size(), PX_FL);
+            buffer->datPairs.allocateElements(capacity, PX_FL);
+            buffer->datCounters.allocateElements(2, PX_FL);
+            mCudaContext->memcpyHtoDAsync(buffer->datEdges.getDevicePtr(), edges.begin(), edges.size()*sizeof(uint2), bpStream);
+            mCudaContext->memsetD32Async(buffer->datCounters.getDevicePtr(), 0, 2, bpStream);
+            // The temporary topology array must outlive its upload.
+            mCudaContext->streamSynchronize(bpStream);
+            femCloth.mDat = {buffer->datBase.getTypedPtr(), buffer->datAccepted.getTypedPtr(),
+                buffer->datFractions.getTypedPtr(), buffer->datEdges.getTypedPtr(), buffer->datBounds.getTypedPtr(),
+                buffer->datPairs.getTypedPtr(), buffer->datCounters.getTypedPtr(), edges.size(), capacity};
+        }
+
 
 		// allocated on attachShape, deallocated on detachShape, user is responsible for initialization.
 		femCloth.mPosition_InvMass = reinterpret_cast<float4*>(dyDeformableSurfaceCore.positionInvMass);

@@ -32,6 +32,7 @@
 #include "foundation/PxArray.h"
 #include "foundation/PxBounds3.h"
 #include <vector_types.h>
+#include "PxgClothDat.h"
 
 namespace physx
 {
@@ -74,6 +75,7 @@ class PxgFEMCloth
 	void deallocate(Cm::VirtualAllocatorCallback& hostAlloc);
 
 	void* mTriMeshData;
+	PxgClothDat mDat;
 
 	float4* mVelocity_InvMass;
 	float4* mPosition_InvMass;
